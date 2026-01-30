@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(wc -l:*)",
+      "Bash(cargo test:*)"
+    ]
+  }
+}

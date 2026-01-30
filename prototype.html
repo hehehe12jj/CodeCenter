@@ -1,0 +1,1233 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CodeAgent - 智能编程助手</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --bg-primary: #0d0d0f;
+            --bg-secondary: #16161a;
+            --bg-tertiary: #1c1c22;
+            --bg-card: rgba(28, 28, 34, 0.6);
+            --bg-glass: rgba(255, 255, 255, 0.03);
+            --border-color: rgba(255, 255, 255, 0.08);
+            --border-hover: rgba(255, 255, 255, 0.12);
+            --text-primary: #f5f5f7;
+            --text-secondary: rgba(255, 255, 255, 0.6);
+            --text-tertiary: rgba(255, 255, 255, 0.4);
+            --accent: #fff;
+            --accent-soft: rgba(255, 255, 255, 0.1);
+            --success: #34d399;
+            --warning: #fbbf24;
+            --error: #f87171;
+            --info: #60a5fa;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+            line-height: 1.5;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        /* Ambient Background */
+        .ambient-bg {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            pointer-events: none;
+            z-index: -1;
+            overflow: hidden;
+        }
+
+        .ambient-bg::before {
+            content: '';
+            position: absolute;
+            width: 800px;
+            height: 800px;
+            background: radial-gradient(circle, rgba(120, 119, 198, 0.15) 0%, transparent 70%);
+            top: -200px;
+            right: -200px;
+            animation: float 20s ease-in-out infinite;
+        }
+
+        .ambient-bg::after {
+            content: '';
+            position: absolute;
+            width: 600px;
+            height: 600px;
+            background: radial-gradient(circle, rgba(251, 191, 36, 0.08) 0%, transparent 70%);
+            bottom: -100px;
+            left: -100px;
+            animation: float 15s ease-in-out infinite reverse;
+        }
+
+        @keyframes float {
+            0%, 100% { transform: translate(0, 0); }
+            50% { transform: translate(30px, 30px); }
+        }
+
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+            padding: 40px 24px 80px;
+        }
+
+        /* Header */
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 48px;
+            padding-bottom: 24px;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .logo-icon {
+            width: 36px;
+            height: 36px;
+            background: linear-gradient(135deg, var(--text-primary) 0%, rgba(255,255,255,0.7) 100%);
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+        }
+
+        .logo-text {
+            font-size: 20px;
+            font-weight: 600;
+            letter-spacing: -0.02em;
+        }
+
+        .header-actions {
+            display: flex;
+            gap: 12px;
+        }
+
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 10px;
+            cursor: pointer;
+            font-family: inherit;
+            font-size: 14px;
+            font-weight: 500;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .btn-primary {
+            background: var(--text-primary);
+            color: var(--bg-primary);
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 8px 24px rgba(255, 255, 255, 0.15);
+        }
+
+        .btn-secondary {
+            background: var(--bg-glass);
+            color: var(--text-primary);
+            border: 1px solid var(--border-color);
+            backdrop-filter: blur(20px);
+        }
+
+        .btn-secondary:hover {
+            background: var(--accent-soft);
+            border-color: var(--border-hover);
+        }
+
+        /* Stats Bar */
+        .stats-bar {
+            display: flex;
+            align-items: center;
+            gap: 32px;
+            margin-bottom: 40px;
+            padding: 20px 24px;
+            background: var(--bg-card);
+            border-radius: 16px;
+            border: 1px solid var(--border-color);
+            backdrop-filter: blur(20px);
+        }
+
+        .stat-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .stat-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            position: relative;
+        }
+
+        .stat-dot::after {
+            content: '';
+            position: absolute;
+            inset: -4px;
+            border-radius: 50%;
+            border: 1px solid currentColor;
+            opacity: 0.3;
+        }
+
+        .stat-dot.running { background: var(--success); color: var(--success); }
+        .stat-dot.waiting { background: var(--warning); color: var(--warning); }
+        .stat-dot.done { background: var(--info); color: var(--info); }
+
+        .stat-content {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .stat-value {
+            font-size: 22px;
+            font-weight: 600;
+            letter-spacing: -0.02em;
+            line-height: 1.2;
+        }
+
+        .stat-label {
+            font-size: 12px;
+            color: var(--text-tertiary);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .last-update {
+            margin-left: auto;
+            font-size: 13px;
+            color: var(--text-tertiary);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        /* Section Header */
+        .section-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .section-title {
+            font-size: 13px;
+            font-weight: 500;
+            color: var(--text-tertiary);
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+        }
+
+        /* Session List */
+        .session-list {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .session-card {
+            background: var(--bg-card);
+            border-radius: 16px;
+            padding: 24px;
+            cursor: pointer;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            border: 1px solid var(--border-color);
+            backdrop-filter: blur(20px);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .session-card::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(135deg, rgba(255,255,255,0.03) 0%, transparent 100%);
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+
+        .session-card:hover {
+            transform: translateY(-2px);
+            border-color: var(--border-hover);
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
+        }
+
+        .session-card:hover::before {
+            opacity: 1;
+        }
+
+        .session-card.active {
+            border-color: rgba(52, 211, 153, 0.4);
+        }
+
+        .session-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 16px;
+            position: relative;
+            z-index: 1;
+        }
+
+        .session-title {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+
+        .session-title h3 {
+            font-size: 16px;
+            font-weight: 500;
+            color: var(--text-primary);
+            letter-spacing: -0.01em;
+        }
+
+        .project-tag {
+            padding: 4px 10px;
+            background: var(--accent-soft);
+            border-radius: 6px;
+            font-size: 12px;
+            color: var(--text-secondary);
+            font-weight: 500;
+        }
+
+        .status-badge {
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            background: var(--bg-glass);
+            border: 1px solid var(--border-color);
+        }
+
+        .status-badge.running {
+            color: var(--success);
+            background: rgba(52, 211, 153, 0.08);
+            border-color: rgba(52, 211, 153, 0.2);
+        }
+
+        .status-badge.waiting {
+            color: var(--warning);
+            background: rgba(251, 191, 36, 0.08);
+            border-color: rgba(251, 191, 36, 0.2);
+        }
+
+        .status-badge.done {
+            color: var(--info);
+            background: rgba(96, 165, 250, 0.08);
+            border-color: rgba(96, 165, 250, 0.2);
+        }
+
+        .status-badge.blocked {
+            color: var(--error);
+            background: rgba(248, 113, 113, 0.08);
+            border-color: rgba(248, 113, 113, 0.2);
+        }
+
+        .status-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: currentColor;
+        }
+
+        .status-badge.running .status-dot,
+        .status-badge.blocked .status-dot {
+            animation: pulse 2s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.5; transform: scale(0.8); }
+        }
+
+        .session-meta {
+            display: flex;
+            gap: 20px;
+            font-size: 13px;
+            color: var(--text-tertiary);
+            margin-bottom: 16px;
+            position: relative;
+            z-index: 1;
+        }
+
+        .session-meta span {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .session-summary {
+            font-size: 14px;
+            color: var(--text-secondary);
+            line-height: 1.7;
+            padding: 16px;
+            background: var(--bg-glass);
+            border-radius: 10px;
+            border-left: 3px solid rgba(255, 255, 255, 0.1);
+            position: relative;
+            z-index: 1;
+        }
+
+        .session-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 20px;
+            opacity: 0;
+            transform: translateY(-8px);
+            transition: all 0.3s ease;
+            position: relative;
+            z-index: 1;
+        }
+
+        .session-card:hover .session-actions {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        .action-btn {
+            padding: 8px 16px;
+            background: var(--bg-glass);
+            border: 1px solid var(--border-color);
+            color: var(--text-secondary);
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 13px;
+            font-family: inherit;
+            font-weight: 500;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .action-btn:hover {
+            background: var(--accent-soft);
+            color: var(--text-primary);
+            border-color: var(--border-hover);
+        }
+
+        .action-btn.primary {
+            background: var(--text-primary);
+            border-color: var(--text-primary);
+            color: var(--bg-primary);
+        }
+
+        .action-btn.primary:hover {
+            box-shadow: 0 4px 16px rgba(255, 255, 255, 0.2);
+        }
+
+        /* New Session Form */
+        .new-session-form {
+            background: var(--bg-card);
+            border-radius: 16px;
+            padding: 24px;
+            margin-bottom: 24px;
+            display: none;
+            border: 1px solid var(--border-color);
+            backdrop-filter: blur(20px);
+            animation: slideDown 0.3s ease;
+        }
+
+        @keyframes slideDown {
+            from {
+                opacity: 0;
+                transform: translateY(-10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .new-session-form.show {
+            display: block;
+        }
+
+        .form-row {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 16px;
+        }
+
+        .form-input {
+            flex: 1;
+            background: var(--bg-glass);
+            border: 1px solid var(--border-color);
+            border-radius: 10px;
+            padding: 14px 18px;
+            color: var(--text-primary);
+            font-family: inherit;
+            font-size: 14px;
+            transition: all 0.2s;
+        }
+
+        .form-input:focus {
+            outline: none;
+            border-color: rgba(255, 255, 255, 0.3);
+            background: var(--accent-soft);
+        }
+
+        .form-input::placeholder {
+            color: var(--text-tertiary);
+        }
+
+        .form-select {
+            background: var(--bg-glass);
+            border: 1px solid var(--border-color);
+            border-radius: 10px;
+            padding: 14px 18px;
+            color: var(--text-primary);
+            font-family: inherit;
+            font-size: 14px;
+            cursor: pointer;
+            min-width: 200px;
+            transition: all 0.2s;
+        }
+
+        .form-select:focus {
+            outline: none;
+            border-color: rgba(255, 255, 255, 0.3);
+        }
+
+        .form-select option {
+            background: var(--bg-secondary);
+            color: var(--text-primary);
+        }
+
+        /* Chat Modal */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.8);
+            backdrop-filter: blur(10px);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+            padding: 24px;
+            animation: fadeIn 0.3s ease;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        .modal-overlay.show {
+            display: flex;
+        }
+
+        .chat-modal {
+            width: 100%;
+            max-width: 700px;
+            height: 70vh;
+            background: var(--bg-secondary);
+            border-radius: 20px;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            border: 1px solid var(--border-color);
+            animation: scaleIn 0.3s ease;
+        }
+
+        @keyframes scaleIn {
+            from {
+                opacity: 0;
+                transform: scale(0.95);
+            }
+            to {
+                opacity: 1;
+                transform: scale(1);
+            }
+        }
+
+        .chat-header {
+            padding: 20px 24px;
+            background: var(--bg-tertiary);
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .chat-header h3 {
+            font-size: 15px;
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            color: var(--text-primary);
+        }
+
+        .chat-header .project-tag {
+            font-size: 11px;
+            padding: 3px 8px;
+        }
+
+        .close-btn {
+            background: transparent;
+            border: none;
+            color: var(--text-tertiary);
+            cursor: pointer;
+            font-size: 18px;
+            padding: 8px;
+            border-radius: 8px;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .close-btn:hover {
+            background: var(--accent-soft);
+            color: var(--text-primary);
+        }
+
+        .chat-messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 24px;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .message {
+            display: flex;
+            gap: 12px;
+            max-width: 85%;
+            animation: messageIn 0.3s ease;
+        }
+
+        @keyframes messageIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .message.user {
+            align-self: flex-end;
+            flex-direction: row-reverse;
+        }
+
+        .message-avatar {
+            width: 32px;
+            height: 32px;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+            flex-shrink: 0;
+            background: var(--bg-tertiary);
+        }
+
+        .message.user .message-avatar {
+            background: linear-gradient(135deg, var(--text-primary) 0%, rgba(255,255,255,0.8) 100%);
+        }
+
+        .message-content {
+            padding: 14px 18px;
+            border-radius: 16px;
+            font-size: 14px;
+            line-height: 1.7;
+            white-space: pre-wrap;
+        }
+
+        .message.assistant .message-content {
+            background: var(--bg-tertiary);
+            color: var(--text-secondary);
+            border-bottom-left-radius: 4px;
+        }
+
+        .message.user .message-content {
+            background: var(--text-primary);
+            color: var(--bg-primary);
+            border-bottom-right-radius: 4px;
+        }
+
+        .chat-input-area {
+            padding: 20px 24px;
+            background: var(--bg-tertiary);
+            border-top: 1px solid var(--border-color);
+        }
+
+        .chat-input-wrapper {
+            display: flex;
+            gap: 12px;
+            align-items: flex-end;
+        }
+
+        .chat-input {
+            flex: 1;
+            background: var(--bg-glass);
+            border: 1px solid var(--border-color);
+            border-radius: 14px;
+            padding: 14px 18px;
+            color: var(--text-primary);
+            font-family: inherit;
+            font-size: 14px;
+            resize: none;
+            min-height: 48px;
+            max-height: 120px;
+            transition: all 0.2s;
+            line-height: 1.5;
+        }
+
+        .chat-input:focus {
+            outline: none;
+            border-color: rgba(255, 255, 255, 0.3);
+            background: var(--accent-soft);
+        }
+
+        .chat-input::placeholder {
+            color: var(--text-tertiary);
+        }
+
+        .send-btn {
+            padding: 14px 24px;
+            background: var(--text-primary);
+            border: none;
+            border-radius: 14px;
+            color: var(--bg-primary);
+            cursor: pointer;
+            font-family: inherit;
+            font-size: 14px;
+            font-weight: 600;
+            transition: all 0.2s ease;
+        }
+
+        .send-btn:hover {
+            transform: scale(1.02);
+            box-shadow: 0 4px 20px rgba(255, 255, 255, 0.2);
+        }
+
+        .send-btn:active {
+            transform: scale(0.98);
+        }
+
+        /* Toast */
+        .toast {
+            position: fixed;
+            bottom: 32px;
+            left: 50%;
+            transform: translateX(-50%) translateY(20px);
+            padding: 14px 28px;
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+            border-radius: 12px;
+            font-size: 14px;
+            font-weight: 500;
+            border: 1px solid var(--border-color);
+            backdrop-filter: blur(20px);
+            opacity: 0;
+            transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+            z-index: 2000;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.4);
+        }
+
+        .toast.show {
+            opacity: 1;
+            transform: translateX(-50%) translateY(0);
+        }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: var(--border-color);
+            border-radius: 3px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: var(--border-hover);
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .container {
+                padding: 24px 16px 60px;
+            }
+
+            .header {
+                flex-direction: column;
+                gap: 16px;
+                align-items: flex-start;
+            }
+
+            .stats-bar {
+                flex-wrap: wrap;
+                gap: 20px;
+            }
+
+            .last-update {
+                margin-left: 0;
+                width: 100%;
+                justify-content: flex-start;
+            }
+
+            .session-header {
+                flex-direction: column;
+                gap: 12px;
+            }
+
+            .session-meta {
+                flex-wrap: wrap;
+                gap: 12px;
+            }
+
+            .form-row {
+                flex-direction: column;
+            }
+
+            .chat-modal {
+                height: 80vh;
+                border-radius: 16px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="ambient-bg"></div>
+
+    <div class="container">
+        <!-- Header -->
+        <div class="header">
+            <div class="logo">
+                <div class="logo-icon">⟡</div>
+                <span class="logo-text">CodeAgent</span>
+            </div>
+            <div class="header-actions">
+                <button class="btn btn-secondary" onclick="toggleNewSession()">
+                    <span>+</span> 新建会话
+                </button>
+                <button class="btn btn-primary" onclick="refreshSessions()">
+                    <span>↻</span> 刷新
+                </button>
+            </div>
+        </div>
+
+        <!-- Stats Bar -->
+        <div class="stats-bar">
+            <div class="stat-item">
+                <div class="stat-dot running"></div>
+                <div class="stat-content">
+                    <div class="stat-value">2</div>
+                    <div class="stat-label">运行中</div>
+                </div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-dot waiting"></div>
+                <div class="stat-content">
+                    <div class="stat-value">1</div>
+                    <div class="stat-label">等待输入</div>
+                </div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-dot done"></div>
+                <div class="stat-content">
+                    <div class="stat-value">3</div>
+                    <div class="stat-label">已完成</div>
+                </div>
+            </div>
+            <div class="last-update">
+                <span>最后更新:</span>
+                <span id="lastUpdate">10:32:45</span>
+            </div>
+        </div>
+
+        <!-- New Session Form -->
+        <div class="new-session-form" id="newSessionForm">
+            <div class="form-row">
+                <input type="text" class="form-input" placeholder="会话标题" id="sessionTitle">
+                <select class="form-select" id="projectSelect">
+                    <option value="">选择项目...</option>
+                    <option value="/Users/hejj/projects/CodeCenter">CodeCenter</option>
+                    <option value="/Users/hejj/projects/website">website</option>
+                    <option value="/Users/hejj/projects/backend-api">backend-api</option>
+                </select>
+            </div>
+            <div class="form-row">
+                <button class="btn btn-primary" onclick="createSession()">启动会话</button>
+                <button class="btn btn-secondary" onclick="toggleNewSession()">取消</button>
+            </div>
+        </div>
+
+        <!-- Session List -->
+        <div class="session-list" id="sessionList">
+            <!-- Session 1: Waiting for input -->
+            <div class="session-card" onclick="openChat('1')">
+                <div class="session-header">
+                    <div class="session-title">
+                        <h3>实现用户认证模块</h3>
+                        <span class="project-tag">backend-api</span>
+                    </div>
+                    <span class="status-badge waiting">
+                        <span class="status-dot"></span>
+                        等待输入
+                    </span>
+                </div>
+                <div class="session-meta">
+                    <span>开始: 10:15</span>
+                    <span>最后活跃: 10:28</span>
+                    <span>/Users/hejj/projects/backend-api</span>
+                </div>
+                <div class="session-summary">
+                    已完成登录接口的JWT token生成，正在实现refresh token机制，需要确认refresh token的存储策略。
+                </div>
+                <div class="session-actions">
+                    <button class="action-btn primary" onclick="event.stopPropagation(); openChat('1')">继续对话</button>
+                    <button class="action-btn" onclick="event.stopPropagation(); openTerminal('backend-api')">打开终端</button>
+                    <button class="action-btn" onclick="event.stopPropagation(); markDone('1')">标记完成</button>
+                </div>
+            </div>
+
+            <!-- Session 2: Running -->
+            <div class="session-card" onclick="openChat('2')">
+                <div class="session-header">
+                    <div class="session-title">
+                        <h3>修复登录页面布局问题</h3>
+                        <span class="project-tag">website</span>
+                    </div>
+                    <span class="status-badge running">
+                        <span class="status-dot"></span>
+                        运行中
+                    </span>
+                </div>
+                <div class="session-meta">
+                    <span>开始: 10:20</span>
+                    <span>最后活跃: 10:32</span>
+                    <span>/Users/hejj/projects/website</span>
+                </div>
+                <div class="session-summary">
+                    正在执行: Run `npm run build` 检查构建是否有错误。目前正在分析错误日志，定位导致构建失败的依赖问题。
+                </div>
+                <div class="session-actions">
+                    <button class="action-btn primary" onclick="event.stopPropagation(); openChat('2')">继续对话</button>
+                    <button class="action-btn" onclick="event.stopPropagation(); openTerminal('website')">打开终端</button>
+                    <button class="action-btn" onclick="event.stopPropagation(); markDone('2')">标记完成</button>
+                </div>
+            </div>
+
+            <!-- Session 3: Running -->
+            <div class="session-card" onclick="openChat('3')">
+                <div class="session-header">
+                    <div class="session-title">
+                        <h3>添加单元测试</h3>
+                        <span class="project-tag">CodeCenter</span>
+                    </div>
+                    <span class="status-badge running">
+                        <span class="status-dot"></span>
+                        运行中
+                    </span>
+                </div>
+                <div class="session-meta">
+                    <span>开始: 09:45</span>
+                    <span>最后活跃: 10:31</span>
+                    <span>/Users/hejj/projects/CodeCenter</span>
+                </div>
+                <div class="session-summary">
+                    正在为util模块编写单元测试，已完成基础函数测试，现在正在处理异步函数的mock测试用例。
+                </div>
+                <div class="session-actions">
+                    <button class="action-btn primary" onclick="event.stopPropagation(); openChat('3')">继续对话</button>
+                    <button class="action-btn" onclick="event.stopPropagation(); openTerminal('CodeCenter')">打开终端</button>
+                    <button class="action-btn" onclick="event.stopPropagation(); markDone('3')">标记完成</button>
+                </div>
+            </div>
+
+            <!-- Session 4: Blocked -->
+            <div class="session-card" onclick="openChat('4')">
+                <div class="session-header">
+                    <div class="session-title">
+                        <h3>重构数据库迁移脚本</h3>
+                        <span class="project-tag">backend-api</span>
+                    </div>
+                    <span class="status-badge blocked">
+                        <span class="status-dot"></span>
+                        执行阻塞
+                    </span>
+                </div>
+                <div class="session-meta">
+                    <span>开始: 10:00</span>
+                    <span>最后活跃: 10:05</span>
+                    <span>/Users/hejj/projects/backend-api</span>
+                </div>
+                <div class="session-summary">
+                    错误: Database connection failed. 请检查数据库配置或手动运行迁移脚本后重试。
+                </div>
+                <div class="session-actions">
+                    <button class="action-btn primary" onclick="event.stopPropagation(); openChat('4')">继续对话</button>
+                    <button class="action-btn" onclick="event.stopPropagation(); openTerminal('backend-api')">打开终端</button>
+                    <button class="action-btn" onclick="event.stopPropagation(); markDone('4')">标记完成</button>
+                </div>
+            </div>
+
+            <!-- Session 5: Done -->
+            <div class="session-card" onclick="openChat('5')">
+                <div class="session-header">
+                    <div class="session-title">
+                        <h3>更新依赖版本</h3>
+                        <span class="project-tag">website</span>
+                    </div>
+                    <span class="status-badge done">
+                        <span class="status-dot"></span>
+                        已完成
+                    </span>
+                </div>
+                <div class="session-meta">
+                    <span>开始: 09:30</span>
+                    <span>完成: 09:55</span>
+                    <span>/Users/hejj/projects/website</span>
+                </div>
+                <div class="session-summary">
+                    成功将所有npm依赖更新到最新稳定版本，共更新23个包。建议运行完整测试套件确认兼容性。
+                </div>
+                <div class="session-actions">
+                    <button class="action-btn" onclick="event.stopPropagation(); viewSummary('5')">查看摘要</button>
+                    <button class="action-btn" onclick="event.stopPropagation(); resumeSession('5')">继续对话</button>
+                    <button class="action-btn" onclick="event.stopPropagation(); archiveSession('5')">归档</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Chat Modal -->
+    <div class="modal-overlay" id="chatModal">
+        <div class="chat-modal">
+            <div class="chat-header">
+                <h3>
+                    <span id="chatTitle">会话标题</span>
+                    <span class="project-tag" id="chatProject">project</span>
+                </h3>
+                <button class="close-btn" onclick="closeChat()">✕</button>
+            </div>
+            <div class="chat-messages" id="chatMessages">
+                <!-- Messages will be inserted here -->
+            </div>
+            <div class="chat-input-area">
+                <div class="chat-input-wrapper">
+                    <textarea class="chat-input" placeholder="输入消息..." id="chatInput" rows="1"></textarea>
+                    <button class="send-btn" onclick="sendMessage()">发送</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast -->
+    <div class="toast" id="toast">操作成功</div>
+
+    <script>
+        // Mock data for sessions
+        const sessions = {
+            '1': {
+                title: '实现用户认证模块',
+                project: 'backend-api',
+                messages: [
+                    { role: 'assistant', content: '已连接到 backend-api 项目。我将帮你实现用户认证模块。' },
+                    { role: 'user', content: '实现JWT认证，需要支持登录、注册、token刷新功能' },
+                    { role: 'assistant', content: '好的，我来设计并实现JWT认证模块。首先创建基本结构...' },
+                    { role: 'assistant', content: '已创建登录接口，实现了JWT token生成。正在实现refresh token机制。\n\n需要确认：refresh token 应该存储在哪里？\n1. 数据库（更安全，可撤回）\n2. HttpOnly Cookie（简单，可配合旋转refresh token）\n\n请选择或提供你的方案。' }
+                ]
+            },
+            '2': {
+                title: '修复登录页面布局问题',
+                project: 'website',
+                messages: [
+                    { role: 'assistant', content: '已连接到 website 项目。开始分析登录页面的布局问题...' },
+                    { role: 'assistant', content: '发现几个CSS问题：flex布局缺少换行约束，响应式断点设置不正确。正在修复...' },
+                    { role: 'assistant', content: '正在执行 `npm run build` 检查构建是否有错误...' }
+                ]
+            }
+        };
+
+        let currentChatId = null;
+
+        function toggleNewSession() {
+            const form = document.getElementById('newSessionForm');
+            form.classList.toggle('show');
+        }
+
+        function refreshSessions() {
+            showToast('已刷新');
+            updateTimestamp();
+        }
+
+        function updateTimestamp() {
+            const now = new Date();
+            document.getElementById('lastUpdate').textContent = now.toLocaleTimeString('zh-CN');
+        }
+
+        function openChat(sessionId) {
+            currentChatId = sessionId;
+            const session = sessions[sessionId];
+            if (!session) {
+                // For sessions without mock data, show empty chat
+                document.getElementById('chatTitle').textContent = document.querySelector(`.session-card[onclick="openChat('${sessionId}')"] .session-title h3`).textContent;
+                document.getElementById('chatProject').textContent = document.querySelector(`.session-card[onclick="openChat('${sessionId}')"] .project-tag`).textContent;
+                document.getElementById('chatMessages').innerHTML = '<div class="message assistant"><div class="message-avatar">🤖</div><div class="message-content">开始对话...</div></div>';
+                document.getElementById('chatModal').classList.add('show');
+                return;
+            }
+
+            document.getElementById('chatTitle').textContent = session.title;
+            document.getElementById('chatProject').textContent = session.project;
+
+            const messagesContainer = document.getElementById('chatMessages');
+            messagesContainer.innerHTML = '';
+
+            session.messages.forEach(msg => {
+                const messageEl = document.createElement('div');
+                messageEl.className = `message ${msg.role}`;
+                messageEl.innerHTML = `
+                    <div class="message-avatar">${msg.role === 'assistant' ? '🤖' : '👤'}</div>
+                    <div class="message-content">${msg.content}</div>
+                `;
+                messagesContainer.appendChild(messageEl);
+            });
+
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+
+            document.getElementById('chatModal').classList.add('show');
+        }
+
+        function closeChat() {
+            document.getElementById('chatModal').classList.remove('show');
+            currentChatId = null;
+        }
+
+        function sendMessage() {
+            const input = document.getElementById('chatInput');
+            const content = input.value.trim();
+            if (!content) return;
+
+            const messagesContainer = document.getElementById('chatMessages');
+
+            // Add user message
+            const userMessage = document.createElement('div');
+            userMessage.className = 'message user';
+            userMessage.innerHTML = `
+                <div class="message-avatar">👤</div>
+                <div class="message-content">${content}</div>
+            `;
+            messagesContainer.appendChild(userMessage);
+
+            // Add placeholder for assistant response
+            const assistantMessage = document.createElement('div');
+            assistantMessage.className = 'message assistant';
+            assistantMessage.innerHTML = `
+                <div class="message-avatar">🤖</div>
+                <div class="message-content">思考中...</div>
+            `;
+            messagesContainer.appendChild(assistantMessage);
+
+            // Simulate AI response
+            setTimeout(() => {
+                assistantMessage.querySelector('.message-content').textContent =
+                    '收到！我会继续处理这个问题，请稍等...';
+                messagesContainer.scrollTop = messagesContainer.scrollHeight;
+            }, 1000);
+
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+            input.value = '';
+        }
+
+        function openTerminal(project) {
+            showToast(`正在打开终端: ${project}`);
+        }
+
+        function markDone(sessionId) {
+            showToast('已标记为完成');
+        }
+
+        function viewSummary(sessionId) {
+            showToast('查看摘要');
+        }
+
+        function resumeSession(sessionId) {
+            openChat(sessionId);
+        }
+
+        function archiveSession(sessionId) {
+            showToast('已归档');
+        }
+
+        function createSession() {
+            const title = document.getElementById('sessionTitle').value;
+            const project = document.getElementById('projectSelect').value;
+            if (!title || !project) {
+                showToast('请填写完整信息');
+                return;
+            }
+            showToast(`已启动会话: ${title}`);
+            toggleNewSession();
+        }
+
+        function showToast(message) {
+            const toast = document.getElementById('toast');
+            toast.textContent = message;
+            toast.classList.add('show');
+            setTimeout(() => toast.classList.remove('show'), 2000);
+        }
+
+        // Event listeners
+        document.getElementById('chatInput').addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendMessage();
+            }
+        });
+
+        document.getElementById('chatModal').addEventListener('click', (e) => {
+            if (e.target.id === 'chatModal') {
+                closeChat();
+            }
+        });
+
+        // Auto refresh timestamp
+        setInterval(updateTimestamp, 1000);
+    </script>
+</body>
+</html>
