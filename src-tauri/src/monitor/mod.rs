@@ -683,7 +683,7 @@ impl SessionMonitor {
             // 从项目路径构造日志路径
             let home = dirs::home_dir()?;
             let project_path = &session.project_path;
-            let encoded = project_path.replace('/', "--").replace('\\', "--");
+            let encoded = project_path.replace('/', "-").replace('\\', "-");
             let log_dir = home.join(".claude").join("projects").join(encoded);
 
             // 查找最新的 jsonl 文件
@@ -832,7 +832,7 @@ impl SessionMonitor {
     /// 返回 None 表示无法获取（日志文件不存在等）
     fn get_log_idle_minutes(&self, project_path: &str) -> Option<i64> {
         let home = dirs::home_dir()?;
-        let encoded = project_path.replace('/', "--").replace('\\', "--");
+        let encoded = project_path.replace('/', "-").replace('\\', "-");
         let log_dir = home.join(".claude").join("projects").join(encoded);
 
         // 查找最新的 jsonl 文件
@@ -875,12 +875,19 @@ impl SessionMonitor {
 
             // 判定进程是否存活：
             // - pid != 0：直接检查进程是否存在（kill(pid, 0)）
-            // - pid = 0：从日志发现，检查日志是否在 5 分钟内有更新
+            // - pid = 0：使用 check_process_existence 检查锁文件（遵循哨兵状态机设计）
             let physical_alive = if disc.pid == 0 {
-                // pid=0：从日志发现，检查日志更新时间
-                let idle_mins = self.get_log_idle_minutes(&disc.project_path.to_string_lossy()).unwrap_or(i64::MAX);
-                debug!("[instant_refresh] {} pid=0, 日志空闲 {} 分钟", disc.project_name, idle_mins);
-                idle_mins < 5  // 5 分钟内有更新认为存活
+                // 对 pid=0 也使用锁判断（设计方案要求）
+                match self.check_process_existence(&disc.project_path).await {
+                    ProcessExistence::Alive => true,
+                    ProcessExistence::Dead => false,
+                    ProcessExistence::NotFound => {
+                        // 锁不存在，检查日志是否有更新作为后备
+                        let idle_mins = self.get_log_idle_minutes(&disc.project_path.to_string_lossy()).unwrap_or(i64::MAX);
+                        debug!("[instant_refresh] {} pid=0, 锁不存在，日志空闲 {} 分钟", disc.project_name, idle_mins);
+                        idle_mins < 30  // 30 分钟内有更新认为可能是新增/初始化中
+                    }
+                }
             } else {
                 // pid!=0：直接检查进程是否存在
                 self.discovery.process_exists(disc.pid)

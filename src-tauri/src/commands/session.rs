@@ -102,7 +102,7 @@ pub async fn get_session_detail(
 async fn find_session_log_path(project_path: &str) -> Option<PathBuf> {
     let home = dirs::home_dir()?;
     let project_path = PathBuf::from(project_path);
-    let encoded = project_path.to_string_lossy().replace(['/', '\\'], "--");
+    let encoded = project_path.to_string_lossy().replace(['/', '\\'], "-");
     let log_dir = home.join(".claude").join("projects").join(encoded);
 
     // 查找最新的 jsonl 文件
