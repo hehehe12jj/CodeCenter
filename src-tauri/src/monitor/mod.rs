@@ -33,13 +33,40 @@ use crate::error::{AppError, Result};
 use crate::models::{Message, Session, SessionStatus};
 use discovery::{DiscoveredSession, SessionDiscovery};
 use status_detector::StatusDetector;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::fs::{self, File};
 use std::mem;
+use std::os::fd::AsRawFd;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::{mpsc, RwLock};
 use tracing::{debug, error, info, warn};
 use watcher::{WatchEvent, WatchManager};
+use chrono::{DateTime, Utc};
+
+/// 路径归一化：解决 macOS 大小写、末尾斜杠、Windows 反斜杠的各种不一致
+fn normalize_path(path: &str) -> String {
+    path.to_lowercase()
+        .trim_end_matches(['/', '\\'])
+        .replace('\\', "/")  // 统一使用正斜杠
+}
+
+/// 生成稳定的会话 ID（基于归一化路径）
+fn generate_session_id(disc: &DiscoveredSession) -> String {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+
+    // 使用归一化的路径创建唯一标识（不依赖 PID，因为 pid=0 时不稳定）
+    let normalized_path = normalize_path(&disc.project_path.to_string_lossy());
+    let unique_key = format!("sess_{}", normalized_path);
+
+    // 计算哈希
+    let mut hasher = DefaultHasher::new();
+    unique_key.hash(&mut hasher);
+    let hash = hasher.finish();
+
+    format!("sess_{:x}", hash)
+}
 
 /// 监控事件
 #[derive(Debug, Clone)]
@@ -193,7 +220,7 @@ impl SessionMonitor {
                 // 补充日志路径信息并添加到活跃会话列表
                 debug!("发现 pid=0 的会话: {}", disc.project_name);
                 // 生成 session ID 并添加到 sessions
-                let session_id = Self::generate_session_id(&disc);
+                let session_id = generate_session_id(&disc);
                 match Self::convert_discovered_to_session(&disc).await {
                     Ok(session) => {
                         sessions.insert(session_id, session);
@@ -215,7 +242,7 @@ impl SessionMonitor {
             active_pids.insert(disc.pid);
 
             // 生成固定的 session ID
-            let session_id = Self::generate_session_id(&disc);
+            let session_id = generate_session_id(&disc);
 
             // 转换并添加/更新会话
             match Self::convert_discovered_to_session(&disc).await {
@@ -306,24 +333,6 @@ impl SessionMonitor {
         info!("刷新完成，当前有 {} 个活跃会话", count);
 
         Ok(sessions.values().cloned().collect())
-    }
-
-    /// 生成固定的会话 ID
-    ///
-    /// 使用项目路径的哈希而不是时间戳，确保同一项目/进程的会话 ID 保持稳定
-    fn generate_session_id(disc: &DiscoveredSession) -> String {
-        use std::collections::hash_map::DefaultHasher;
-        use std::hash::{Hash, Hasher};
-
-        // 创建基于 PID 和项目路径的唯一标识
-        let unique_key = format!("{}-{}", disc.pid, disc.project_path.display());
-
-        // 计算哈希
-        let mut hasher = DefaultHasher::new();
-        unique_key.hash(&mut hasher);
-        let hash = hasher.finish();
-
-        format!("sess_{}_{}", disc.pid, hash)
     }
 
     /// 获取特定会话
@@ -616,7 +625,7 @@ impl SessionMonitor {
 
     /// 静态方法：转换 DiscoveredSession 为 Session
     async fn convert_discovered_to_session(disc: &DiscoveredSession) -> Result<Session> {
-        let session_id = Self::generate_session_id(disc);
+        let session_id = generate_session_id(disc);
 
         // 检测初始状态
         let status = if let Some(ref log_path) = disc.log_path {
@@ -828,6 +837,110 @@ impl SessionMonitor {
         ProcessExistence::NotFound
     }
 
+    /// 全量扫描锁文件（快照模式）- 工业加强版
+    /// 快速扫描 IDE 目录，建立 路径 -> 锁是否被占用 的映射
+    async fn scan_all_locks(&self) -> HashMap<String, bool> {
+        let mut lock_map: HashMap<String, bool> = HashMap::new();
+        let ide_dir = &self.discovery.ide_dir;
+
+        if let Ok(mut entries) = tokio::fs::read_dir(ide_dir).await {
+            while let Ok(Some(entry)) = entries.next_entry().await {
+                let path = entry.path();
+                if path.extension().map_or(true, |ext| ext != "lock") {
+                    continue;
+                }
+
+                // 每一个锁文件只判定一次状态
+                let is_alive = self.is_lock_busy(&path);
+                debug!("[scan_all_locks] 锁文件 {} 状态: {}", path.display(), is_alive);
+
+                if let Ok(content) = fs::read_to_string(&path) {
+                    if let Ok(lock_json) = serde_json::from_str::<serde_json::Value>(&content) {
+                        if let Some(folders) = lock_json["workspaceFolders"].as_array() {
+                            for folder in folders {
+                                if let Some(p) = folder.as_str() {
+                                    let normalized_key = normalize_path(p);
+                                    lock_map.insert(normalized_key.clone(), is_alive);
+                                    debug!("[scan_all_locks] 映射: {} -> {}", normalized_key, is_alive);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        debug!("[scan_all_locks] 扫描完成，共 {} 个项目", lock_map.len());
+        debug!("[scan_all_locks] 快照内容: {:?}", lock_map);
+        lock_map
+    }
+
+    /// 底层 flock 判定：使用 Nonblock 非阻塞方式
+    /// 返回 true 表示锁被占用（进程存活），false 表示锁空闲（进程已死）
+    fn is_lock_busy(&self, lock_path: &Path) -> bool {
+        use nix::fcntl::{flock, FlockArg};
+
+        let file = match File::open(lock_path) {
+            Ok(f) => f,
+            Err(e) => {
+                if e.kind() == std::io::ErrorKind::NotFound {
+                    return false;
+                }
+                // 权限错误等保守认为进程存活
+                return true;
+            }
+        };
+
+        let fd = file.as_raw_fd();
+        // 关键：使用 LockExclusiveNonblock 绝不阻塞
+        match flock(fd, FlockArg::LockExclusiveNonblock) {
+            Ok(_) => {
+                // 能加锁成功，说明没人在用这个锁
+                let _ = flock(fd, FlockArg::Unlock);
+                false
+            }
+            Err(_) => {
+                // 任何加锁失败都认为是被占用（进程存活）
+                true
+            }
+        }
+    }
+
+    /// 实时验证特定项目的锁状态
+    async fn verify_project_lock_realtime(&self, project_path: &Path) -> bool {
+        let project_key = normalize_path(&project_path.to_string_lossy());
+        let ide_dir = &self.discovery.ide_dir;
+
+        debug!("[verify_realtime] 实时检查项目: {} (ide_dir: {:?})", project_key, ide_dir);
+
+        if let Ok(mut entries) = tokio::fs::read_dir(ide_dir).await {
+            while let Ok(Some(entry)) = entries.next_entry().await {
+                let path = entry.path();
+                if path.extension().map_or(true, |ext| ext != "lock") {
+                    continue;
+                }
+
+                // 检查是否包含目标项目
+                if let Ok(content) = fs::read_to_string(&path) {
+                    if let Ok(lock_json) = serde_json::from_str::<serde_json::Value>(&content) {
+                        if let Some(folders) = lock_json["workspaceFolders"].as_array() {
+                            let matches = folders.iter().any(|f| {
+                                f.as_str().map_or(false, |p| normalize_path(p) == project_key)
+                            });
+                            if matches {
+                                // 找到匹配的锁文件，实时检查
+                                let is_busy = self.is_lock_busy(&path);
+                                debug!("[verify_realtime] 找到锁文件 {}，状态: {}", path.display(), is_busy);
+                                return is_busy;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        debug!("[verify_realtime] 未找到项目 {} 的锁文件", project_key);
+        false
+    }
+
     /// 获取日志文件的空闲时间（分钟）
     /// 返回 None 表示无法获取（日志文件不存在等）
     fn get_log_idle_minutes(&self, project_path: &str) -> Option<i64> {
@@ -853,112 +966,140 @@ impl SessionMonitor {
         Some(now.signed_duration_since(mtime).num_minutes())
     }
 
-    /// 立即刷新（区分新增与存量）
+    /// 立即刷新（哨兵状态机 - 工业加强版）
     ///
-    /// 策略：
-    /// - 新发现的会话：只要日志存在就立即记录，状态为 Initializing
-    /// - 已缓存的会话：必须有锁才算存活
+    /// 核心逻辑：预扫描建立索引 + 实时二次确认 + 状态超时自愈
+    /// - 新面孔：立即加入，Initializing 状态观察
+    /// - 老员工：实时验证锁状态
+    /// - Initializing 状态有 30 秒宽限期
     pub async fn instant_refresh(&mut self) -> Result<()> {
-        let discovered = self.discovery.discover_sessions().await?;
-        let mut sessions = self.sessions.write().await;
+        let now = Utc::now();
 
-        // 收集本轮发现的会话 ID
-        let mut current_round_ids: std::collections::HashSet<String> =
-            std::collections::HashSet::new();
+        // --- 第一阶段：预扫描建立索引 ---
+        let lock_snapshot = self.scan_all_locks().await;
+
+        // --- 第二阶段：扫描日志（发现会话） ---
+        let discovered = self.discovery.discover_sessions().await?;
+        debug!("[instant_refresh] 发现 {} 个会话", discovered.len());
+
+        let mut sessions = self.sessions.write().await;
+        let mut current_round_ids: HashSet<String> = HashSet::new();
 
         for disc in discovered {
-            let session_id = Self::generate_session_id(&disc);
+            // 使用统一的 ID 生成和路径归一化
+            let session_id = generate_session_id(&disc);
+            let project_key = normalize_path(&disc.project_path.to_string_lossy());
             current_round_ids.insert(session_id.clone());
 
-            // 检查会话是否已缓存
-            let is_known = sessions.contains_key(&session_id);
+            debug!("[instant_refresh] 处理会话: {} (key: {})", disc.project_name, project_key);
 
-            // 判定进程是否存活：
-            // - pid != 0：直接检查进程是否存在（kill(pid, 0)）
-            // - pid = 0：使用 check_process_existence 检查锁文件（遵循哨兵状态机设计）
-            let physical_alive = if disc.pid == 0 {
-                // 对 pid=0 也使用锁判断（设计方案要求）
-                match self.check_process_existence(&disc.project_path).await {
-                    ProcessExistence::Alive => true,
-                    ProcessExistence::Dead => false,
-                    ProcessExistence::NotFound => {
-                        // 锁不存在，检查日志是否有更新作为后备
-                        let idle_mins = self.get_log_idle_minutes(&disc.project_path.to_string_lossy()).unwrap_or(i64::MAX);
-                        debug!("[instant_refresh] {} pid=0, 锁不存在，日志空闲 {} 分钟", disc.project_name, idle_mins);
-                        idle_mins < 30  // 30 分钟内有更新认为可能是新增/初始化中
-                    }
-                }
-            } else {
-                // pid!=0：直接检查进程是否存在
-                self.discovery.process_exists(disc.pid)
-            };
+            // 从快照获取初步判定
+            let snapshot_says_alive = lock_snapshot.get(&project_key).cloned().unwrap_or(false);
+            debug!("[instant_refresh] {} 快照状态: {}", disc.project_name, snapshot_says_alive);
 
-            debug!(
-                "[instant_refresh] {} (is_known={}, alive={}, pid={})",
-                disc.project_name, is_known, physical_alive, disc.pid
-            );
-
-            if !is_known {
-                // === 场景：新增实例 ===
-                // 只要日志存在就立即记录
+            if !sessions.contains_key(&session_id) {
+                // === 新面孔 ===
                 let mut new_session = Self::convert_discovered_to_session(&disc).await?;
+                new_session.created_at = now;
 
-                // 根据锁状态设置初始状态
-                new_session.status = if physical_alive {
+                // 根据快照状态设置初始状态
+                new_session.status = if snapshot_says_alive {
                     SessionStatus::Running
                 } else {
                     SessionStatus::Initializing
                 };
 
-                sessions.insert(session_id.clone(), new_session);
+                sessions.insert(session_id.clone(), new_session.clone());
                 debug!(
-                    "[instant_refresh] 新增会话: {} (状态: {:?})",
-                    disc.project_name,
-                    if physical_alive {
-                        SessionStatus::Running
-                    } else {
-                        SessionStatus::Initializing
-                    }
+                    "[instant_refresh] 新会话: {} (状态: {:?})",
+                    disc.project_name, new_session.status
                 );
 
-                // 发送发现事件
-                if let Some(session) = sessions.get(&session_id) {
-                    let _ = self
-                        .event_sender
-                        .send(MonitorEvent::SessionDiscovered {
-                            session: session.clone(),
-                        })
-                        .await;
-                }
+                let _ = self
+                    .event_sender
+                    .send(MonitorEvent::SessionDiscovered {
+                        session: new_session,
+                    })
+                    .await;
             } else {
-                // === 场景：存量实例检查 ===
-                if !physical_alive {
-                    // 存量会话没锁了，判定为真正退出
-                    sessions.remove(&session_id);
-                    let _ = self
-                        .event_sender
-                        .send(MonitorEvent::SessionEnded {
-                            session_id: session_id.clone(),
-                        })
-                        .await;
-                    debug!("[instant_refresh] 移除失效会话: {}", session_id);
-                } else {
-                    // 如果原来是 Initializing，现在有锁了，自动转 Running
-                    if let Some(s) = sessions.get_mut(&session_id) {
-                        if s.status == SessionStatus::Initializing {
-                            s.status = SessionStatus::Running;
-                            debug!("[instant_refresh] {} 状态更新: Initializing -> Running", session_id);
+                // === 老员工 ===
+                let session = sessions.get_mut(&session_id).unwrap();
+                let uptime = now.signed_duration_since(session.created_at).num_seconds();
+
+                debug!(
+                    "[instant_refresh] 老员工: {} (状态: {:?}, 运行时长: {}s)",
+                    disc.project_name, session.status, uptime
+                );
+
+                // 核心修复：无论快照说什么，都实时验证
+                let is_currently_alive = self.verify_project_lock_realtime(&disc.project_path).await;
+                debug!("[instant_refresh] {} 实时锁状态: {}", disc.project_name, is_currently_alive);
+
+                if !is_currently_alive {
+                    // 锁确实释放了
+                    match session.status {
+                        SessionStatus::Initializing => {
+                            // Initializing 状态给 30 秒宽限期
+                            if uptime > 30 {
+                                debug!(
+                                    "[instant_refresh] {} 初始化超时（{}s），清理",
+                                    disc.project_name, uptime
+                                );
+                                current_round_ids.remove(&session_id);
+                            } else {
+                                debug!(
+                                    "[instant_refresh] {} 初始化中（{}s），继续等待",
+                                    disc.project_name, uptime
+                                );
+                            }
                         }
+                        SessionStatus::Running => {
+                            // Running 状态锁释放 = 进程退出
+                            debug!("[instant_refresh] {} 进程已退出", disc.project_name);
+                            current_round_ids.remove(&session_id);
+                        }
+                        _ => {}
+                    }
+                } else {
+                    // 锁被占用，检查状态转换
+                    if session.status == SessionStatus::Initializing {
+                        debug!("[instant_refresh] {} 转正: Initializing -> Running", disc.project_name);
+                        session.status = SessionStatus::Running;
+                        let _ = self
+                            .event_sender
+                            .send(MonitorEvent::StatusChanged {
+                                session_id: session_id.clone(),
+                                old_status: SessionStatus::Initializing,
+                                new_status: SessionStatus::Running,
+                            })
+                            .await;
                     }
                 }
             }
         }
 
-        // 补偿：如果磁盘上连日志都没了，强制清理
-        sessions.retain(|id, _| current_round_ids.contains(id));
+        // 清理阶段
+        let mut to_remove = Vec::new();
+        sessions.retain(|id, session| {
+            let keep = current_round_ids.contains(id);
+            if !keep {
+                to_remove.push(id.clone());
+                debug!("[instant_refresh] 清理会话: {}", session.project_name);
+            }
+            keep
+        });
 
-        info!("[instant_refresh] 完成，发现 {} 个会话", current_round_ids.len());
+        for id in to_remove {
+            let _ = self
+                .event_sender
+                .send(MonitorEvent::SessionEnded { session_id: id })
+                .await;
+        }
 
+        info!(
+            "[instant_refresh] 完成，活跃会话: {}",
+            current_round_ids.len()
+        );
         Ok(())
     }
 }
