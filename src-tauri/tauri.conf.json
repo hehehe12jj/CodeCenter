@@ -1,6 +1,6 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-  "productName": "CodeAgent Dashboard",
+  "productName": "CodeCenter",
   "version": "0.1.0",
   "identifier": "com.codeagent.dashboard",
   "build": {
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "CodeAgent Dashboard",
+        "title": "CodeCenter",
         "width": 1200,
         "height": 800,
         "minWidth": 900,
@@ -43,5 +43,11 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ]
+  },
+  "plugins": {
+    "dialog": {
+      "open": true,
+      "save": true
+    }
   }
 }

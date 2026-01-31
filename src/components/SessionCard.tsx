@@ -1,81 +1,108 @@
-import { Session } from "../types/session";
+import { useMemo } from 'react';
+import { Session } from '../types/session';
+import { formatRelativeTime } from '../utils/formatters';
+import { getDirectoryName } from '../utils/path-utils';
+import { MessageSquare } from 'lucide-react';
 
 interface SessionCardProps {
   session: Session;
-  onRefresh: () => void;
+  isSelected?: boolean;
+  onSelect?: (session: Session) => void;
+  onOpenChat?: (sessionId: string) => void;
+  className?: string;
 }
 
-export default function SessionCard({ session, onRefresh: _onRefresh }: SessionCardProps) {
-  const getStatusClass = (status: string) => {
-    switch (status) {
-      case "running":
-        return "status-dot-running";
-      case "waiting_input":
-        return "status-dot-waiting";
-      case "completed":
-        return "status-dot-completed";
-      case "blocked":
-        return "status-dot-blocked";
-      default:
-        return "";
-    }
+const statusConfig = {
+  running: {
+    color: 'bg-status-running',
+    label: '运行中',
+  },
+  waiting_input: {
+    color: 'bg-status-waiting',
+    label: '等待输入',
+  },
+  completed: {
+    color: 'bg-status-completed',
+    label: '已完成',
+  },
+  blocked: {
+    color: 'bg-status-blocked',
+    label: '阻塞',
+  },
+};
+
+export default function SessionCard({
+  session,
+  isSelected = false,
+  onSelect,
+  onOpenChat,
+  className,
+}: SessionCardProps) {
+  const status = statusConfig[session.status as keyof typeof statusConfig] || statusConfig.running;
+
+  const formattedTime = useMemo(() => {
+    return formatRelativeTime(session.lastActiveAt);
+  }, [session.lastActiveAt]);
+
+  const simplifiedPath = useMemo(() => {
+    return getDirectoryName(session.projectPath);
+  }, [session.projectPath]);
+
+  const handleCardClick = () => {
+    onSelect?.(session);
   };
 
-  const getStatusText = (status: string) => {
-    switch (status) {
-      case "running":
-        return "运行中";
-      case "waiting_input":
-        return "等待输入";
-      case "completed":
-        return "已完成";
-      case "blocked":
-        return "执行阻塞";
-      default:
-        return "未知";
-    }
-  };
-
-  const formatTime = (isoString: string) => {
-    const date = new Date(isoString);
-    return date.toLocaleTimeString("zh-CN", {
-      hour: "2-digit",
-      minute: "2-digit",
-    });
+  const handleOpenChat = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    onOpenChat?.(session.id);
   };
 
   return (
-    <div className="glass-card p-5 hover:bg-white/5 transition-all duration-200 cursor-pointer group">
-      <div className="flex items-start justify-between mb-3">
-        <h3 className="font-medium text-white/90 truncate pr-4">
+    <div
+      className={`
+        glass-card p-4 hover:bg-white/5 transition-all duration-200 cursor-pointer group
+        ${isSelected ? 'ring-2 ring-status-running/50 border-status-running' : ''}
+        ${className || ''}
+      `}
+      onClick={handleCardClick}
+    >
+      {/* 状态指示条（左侧） */}
+      <div className={`absolute left-0 top-0 bottom-0 w-1 ${status.color}`} />
+
+      {/* 右上角状态 */}
+      <div className="absolute top-3 right-3 flex items-center gap-1.5">
+        <span className={`w-1.5 h-1.5 rounded-full ${status.color}`} />
+        <span className="text-xs text-white/60">{status.label}</span>
+      </div>
+
+      <div className="pl-3">
+        {/* 标题：项目名 | 第一条用户消息 */}
+        <h3 className="font-medium text-white/90 truncate pr-8 mb-1">
           {session.title}
         </h3>
-        <div className="flex items-center gap-2 shrink-0">
-          <span className={`status-dot ${getStatusClass(session.status)}`}></span>
-          <span className="text-xs text-white/60">{getStatusText(session.status)}</span>
+
+        {/* 路径 */}
+        <div className="text-xs text-white/40 font-mono truncate mb-3">
+          {simplifiedPath}
         </div>
-      </div>
 
-      <div className="text-sm text-white/40 mb-2">{session.projectName}</div>
+        {/* 底部：时间 + 操作按钮 */}
+        <div className="flex items-center justify-between">
+          <div className="text-xs text-white/30">
+            活跃于 {formattedTime}
+          </div>
 
-      <div className="text-xs text-white/30 mb-4">
-        开始: {formatTime(session.createdAt)} · 最后活跃: {formatTime(session.lastActiveAt)}
-      </div>
-
-      <div className="text-sm text-white/50 mb-4 truncate">
-        {session.summary || "暂无消息摘要"}
-      </div>
-
-      <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
-        <button className="glass-button px-3 py-1.5 text-xs text-white">
-          继续对话
-        </button>
-        <button className="glass-button px-3 py-1.5 text-xs text-white">
-          打开终端
-        </button>
-        <button className="glass-button px-3 py-1.5 text-xs text-white">
-          标记完成
-        </button>
+          {/* 只保留继续对话按钮 */}
+          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+            <button
+              onClick={handleOpenChat}
+              className="glass-button px-3 py-1.5 text-xs text-white flex items-center gap-1.5"
+            >
+              <MessageSquare className="w-3.5 h-3.5" />
+              继续对话
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   );

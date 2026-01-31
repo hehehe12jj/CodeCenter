@@ -12,6 +12,8 @@ pub enum SessionStatus {
     Completed,
     /// 执行阻塞 - 红色脉冲
     Blocked,
+    /// 初始化中 - 锁文件尚未就绪
+    Initializing,
     /// 未知状态
     Unknown,
 }
@@ -30,6 +32,7 @@ impl SessionStatus {
             SessionStatus::WaitingInput => "等待输入",
             SessionStatus::Completed => "已完成",
             SessionStatus::Blocked => "执行阻塞",
+            SessionStatus::Initializing => "初始化中",
             SessionStatus::Unknown => "未知",
         }
     }
@@ -41,12 +44,13 @@ impl SessionStatus {
             SessionStatus::WaitingInput => "#eab308",
             SessionStatus::Completed => "#3b82f6",
             SessionStatus::Blocked => "#ef4444",
+            SessionStatus::Initializing => "#8b5cf6", // 紫色表示初始化
             SessionStatus::Unknown => "#6b7280",
         }
     }
 
     /// 是否显示脉冲动画
     pub fn is_pulsing(&self) -> bool {
-        matches!(self, SessionStatus::Running | SessionStatus::Blocked)
+        matches!(self, SessionStatus::Running | SessionStatus::Blocked | SessionStatus::Initializing)
     }
 }

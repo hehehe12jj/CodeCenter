@@ -9,32 +9,44 @@ use tauri::State;
 pub async fn get_all_sessions(state: State<'_, AppState>) -> std::result::Result<Vec<Session>, String> {
     tracing::info!("[get_all_sessions] 命令被调用");
 
-    // 首先尝试从 monitor 获取活跃会话
+    // 使用 write lock 以支持即时刷新
     tracing::info!("[get_all_sessions] 尝试获取 monitor 锁...");
-    let monitor = state.monitor.read().await;
-    tracing::info!("[get_all_sessions] 获取到 monitor 锁, 调用 get_active_sessions...");
+    let mut monitor = state.monitor.write().await;
+    tracing::info!("[get_all_sessions] 获取到 monitor 锁, 调用 instant_refresh...");
+
+    // 调用 instant_refresh 区分新增/存量会话
+    if let Err(e) = monitor.instant_refresh().await {
+        tracing::error!("[get_all_sessions] instant_refresh 错误: {}", e);
+        return Err(e.to_string());
+    }
 
     let sessions = monitor.get_active_sessions().await.map_err(|e| {
         tracing::error!("[get_all_sessions] get_active_sessions 错误: {}", e);
         e.to_string()
     })?;
 
-    tracing::info!("[get_all_sessions] 从 monitor 获取到 {} 个会话", sessions.len());
+    tracing::info!("[get_all_sessions] 获取到 {} 个会话", sessions.len());
 
-    // 如果 monitor 没有会话，尝试从 storage 加载
-    if sessions.is_empty() {
-        drop(monitor);
+    // 只过滤掉 Unknown 状态的会话（Initializing 也展示，显示为运行中）
+    let filtered_sessions: Vec<Session> = sessions
+        .into_iter()
+        .filter(|s| s.status != SessionStatus::Unknown)
+        .collect();
+    tracing::info!("[get_all_sessions] 过滤后剩余 {} 个会话", filtered_sessions.len());
+
+    // 如果没有会话，尝试从 storage 加载
+    if filtered_sessions.is_empty() {
         let storage = state.storage();
         let storage_sessions = storage.get_active_sessions().await.map_err(|e| e.to_string())?;
         tracing::info!("[get_all_sessions] 从 storage 获取到 {} 个会话", storage_sessions.len());
         Ok(storage_sessions)
     } else {
         // 打印第一个会话的详细信息用于调试
-        if let Some(first) = sessions.first() {
+        if let Some(first) = filtered_sessions.first() {
             tracing::info!("[get_all_sessions] 第一个会话: id={}, title={}, status={:?}, created_at={:?}",
                 first.id, first.title, first.status, first.created_at);
         }
-        Ok(sessions)
+        Ok(filtered_sessions)
     }
 }
 

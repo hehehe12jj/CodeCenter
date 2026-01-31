@@ -2,7 +2,8 @@
   "permissions": {
     "allow": [
       "Bash(wc -l:*)",
-      "Bash(cargo test:*)"
+      "Bash(cargo test:*)",
+      "WebFetch(domain:minimax-algeng-chat-tts.oss-cn-wulanchabu.aliyuncs.com)"
     ]
   }
 }

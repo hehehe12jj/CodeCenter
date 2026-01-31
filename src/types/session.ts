@@ -1,8 +1,11 @@
 export type SessionStatus =
   | "running"
   | "waiting_input"
+  | "blocked"
   | "completed"
-  | "blocked";
+  | "archived"
+  | "unknown"
+  | "initializing";
 
 export interface Session {
   id: string;

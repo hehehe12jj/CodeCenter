@@ -1,14 +1,16 @@
 interface StatusBarProps {
   runningCount: number;
-  waitingCount: number;
-  completedCount: number;
+  waitingInputCount: number;
+  blockedCount: number;
+  totalCount: number;
   lastUpdated: Date;
 }
 
 export default function StatusBar({
   runningCount,
-  waitingCount,
-  completedCount,
+  waitingInputCount,
+  blockedCount,
+  totalCount,
   lastUpdated,
 }: StatusBarProps) {
   const formatTime = (date: Date) => {
@@ -30,13 +32,17 @@ export default function StatusBar({
           </div>
           <div className="flex items-center gap-2">
             <span className="status-dot status-dot-waiting"></span>
-            <span className="text-2xl font-semibold">{waitingCount}</span>
+            <span className="text-2xl font-semibold">{waitingInputCount}</span>
             <span className="text-white/60 text-sm">等待输入</span>
           </div>
           <div className="flex items-center gap-2">
-            <span className="status-dot status-dot-completed"></span>
-            <span className="text-2xl font-semibold">{completedCount}</span>
-            <span className="text-white/60 text-sm">已完成</span>
+            <span className="status-dot status-dot-blocked"></span>
+            <span className="text-2xl font-semibold">{blockedCount}</span>
+            <span className="text-white/60 text-sm">阻塞</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-2xl font-semibold">{totalCount}</span>
+            <span className="text-white/60 text-sm">总会话数</span>
           </div>
         </div>
         <div className="text-white/40 text-sm">

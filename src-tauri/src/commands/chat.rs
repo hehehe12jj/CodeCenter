@@ -37,6 +37,9 @@ pub async fn attach_to_session(
         crate::models::SessionStatus::WaitingInput => {
             // 等待输入，可以连接
         }
+        crate::models::SessionStatus::Initializing => {
+            // 初始化中，可以连接
+        }
         crate::models::SessionStatus::Completed => {
             return Err("会话已完成，无法附加".to_string());
         }

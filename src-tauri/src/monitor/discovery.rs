@@ -322,7 +322,7 @@ impl SessionDiscovery {
     }
 
     /// 检查进程是否存在
-    fn process_exists(&self, pid: u32) -> bool {
+    pub fn process_exists(&self, pid: u32) -> bool {
         #[cfg(unix)]
         {
             // Unix: 发送信号 0 检查进程是否存在
@@ -401,19 +401,88 @@ impl SessionDiscovery {
             Ok(Utc::now())
         }
     }
+
+    /// 检查项目是否有对应的活跃锁文件
+    /// 遍历所有锁文件，检查 workspace_folders 是否包含目标项目路径
+    pub async fn has_active_lock_file(&self, project_path: &Path) -> bool {
+        let project_path_str = project_path.to_string_lossy();
+        debug!("[has_active_lock_file] 检查项目: {}", project_path_str);
+
+        if !self.ide_dir.exists() {
+            debug!("[has_active_lock_file] IDE 目录不存在: {:?}", self.ide_dir);
+            return false;
+        }
+
+        let mut entries = match tokio::fs::read_dir(&self.ide_dir).await {
+            Ok(entries) => entries,
+            Err(e) => {
+                debug!("[has_active_lock_file] 读取目录失败: {}", e);
+                return false;
+            }
+        };
+
+        let mut lock_file_count = 0;
+        while let Ok(Some(entry)) = entries.next_entry().await {
+            let path = entry.path();
+            if path.extension() != Some("lock".as_ref()) {
+                continue;
+            }
+            lock_file_count += 1;
+
+            debug!("[has_active_lock_file] 检查锁文件: {:?}", path);
+
+            // 解析锁文件内容
+            match tokio::fs::read_to_string(&path).await {
+                Ok(content) => {
+                    match serde_json::from_str::<LockFile>(&content) {
+                        Ok(lock) => {
+                            debug!("[has_active_lock_file] 锁文件 PID: {}, workspaces: {:?}", lock.pid, lock.workspace_folders);
+
+                            // 检查 workspace_folders 是否包含目标项目路径
+                            let found = lock.workspace_folders.iter().any(|p| {
+                                let matches = PathBuf::from(p) == project_path;
+                                debug!("[has_active_lock_file] 比较: '{}' vs '{}' = {}", p, project_path_str, matches);
+                                matches
+                            });
+
+                            if found {
+                                // 额外检查进程是否仍然存在
+                                if self.process_exists(lock.pid) {
+                                    debug!("[has_active_lock_file] 找到匹配且进程存在, PID: {}", lock.pid);
+                                    return true;
+                                } else {
+                                    debug!("[has_active_lock_file] 找到匹配但进程不存在, PID: {}", lock.pid);
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            debug!("[has_active_lock_file] 解析锁文件 JSON 失败: {}", e);
+                        }
+                    }
+                }
+                Err(e) => {
+                    debug!("[has_active_lock_file] 读取锁文件失败: {}", e);
+                }
+            }
+        }
+
+        debug!("[has_active_lock_file] 检查了 {} 个锁文件, 未找到匹配", lock_file_count);
+        false
+    }
 }
 
 /// 编码项目路径为文件名安全的字符串
-/// Claude Code 使用的编码方式
+/// Claude Code 使用的编码方式：将 / 替换为 -
 fn encode_project_path(path: &Path) -> String {
     let path_str = path.to_string_lossy();
-    // 替换路径分隔符为特殊字符
-    path_str.replace('/', "--").replace('\\', "--")
+    // 替换路径分隔符为单连字符（与 Claude Code 日志目录格式一致）
+    path_str.replace('/', "-").replace('\\', "-")
 }
 
 /// 解码项目路径
 fn decode_project_path(encoded: &str) -> PathBuf {
-    let decoded = encoded.replace("--", "/");
+    // 将单连字符替换回路径分隔符
+    let decoded = encoded.replace('-', "/");
     PathBuf::from(decoded)
 }
 

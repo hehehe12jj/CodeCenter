@@ -1,6 +1,29 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
+/// 自定义时间序列化模块 - 使用 RFC3339 格式
+mod datetime_serde {
+    use chrono::{DateTime, Utc};
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S>(datetime: &DateTime<Utc>, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&datetime.to_rfc3339())
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<DateTime<Utc>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        DateTime::parse_from_rfc3339(&s)
+            .map(|dt| dt.with_timezone(&Utc))
+            .map_err(serde::de::Error::custom)
+    }
+}
+
 pub mod status;
 
 pub use status::SessionStatus;
@@ -31,7 +54,9 @@ pub struct Session {
     pub project_path: String,
     pub agent_type: String,
     pub status: SessionStatus,
+    #[serde(with = "datetime_serde")]
     pub created_at: DateTime<Utc>,
+    #[serde(with = "datetime_serde")]
     pub last_active_at: DateTime<Utc>,
     pub summary: Option<String>,
     pub is_archived: bool,

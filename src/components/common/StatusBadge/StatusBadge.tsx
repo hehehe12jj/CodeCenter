@@ -1,7 +1,7 @@
 import React from 'react';
 import { cn } from '@/utils/cn';
 import type { SessionStatus } from '@/types/session';
-import { Play, Clock, CheckCircle2, AlertCircle, type LucideIcon } from 'lucide-react';
+import { Play, AlertCircle, CheckCircle, Clock, Loader2, type LucideIcon } from 'lucide-react';
 
 interface StatusBadgeProps {
   /**
@@ -44,6 +44,7 @@ const statusConfig: Record<
     borderColor: string;
     label: string;
     pulse: boolean;
+    spin?: boolean;
   }
 > = {
   running: {
@@ -62,21 +63,46 @@ const statusConfig: Record<
     label: '等待输入',
     pulse: false,
   },
+  blocked: {
+    icon: AlertCircle,
+    color: 'text-status-blocked',
+    bgColor: 'bg-status-blocked/20',
+    borderColor: 'border-status-blocked/30',
+    label: '阻塞',
+    pulse: true,
+  },
   completed: {
-    icon: CheckCircle2,
+    icon: CheckCircle,
     color: 'text-status-completed',
     bgColor: 'bg-status-completed/20',
     borderColor: 'border-status-completed/30',
     label: '已完成',
     pulse: false,
   },
-  blocked: {
+  archived: {
+    icon: CheckCircle,
+    color: 'text-status-completed',
+    bgColor: 'bg-status-completed/10',
+    borderColor: 'border-status-completed/20',
+    label: '已归档',
+    pulse: false,
+  },
+  unknown: {
     icon: AlertCircle,
-    color: 'text-status-blocked',
-    bgColor: 'bg-status-blocked/20',
-    borderColor: 'border-status-blocked/30',
-    label: '执行阻塞',
+    color: 'text-gray-400',
+    bgColor: 'bg-gray-400/10',
+    borderColor: 'border-gray-400/20',
+    label: '未知',
+    pulse: false,
+  },
+  initializing: {
+    icon: Loader2,
+    color: 'text-status-running',
+    bgColor: 'bg-status-running/20',
+    borderColor: 'border-status-running/30',
+    label: '运行中',
     pulse: true,
+    spin: true,
   },
 };
 
@@ -86,7 +112,7 @@ const statusConfig: Record<
  * @example
  * ```tsx
  * <StatusBadge status="running" />
- * <StatusBadge status="waiting_input" size="lg" pulse={false} />
+ * <StatusBadge status="blocked" size="lg" pulse={false} />
  * <StatusBadge status="completed" children="自定义文本" />
  * ```
  */
@@ -101,6 +127,7 @@ export const StatusBadge: React.FC<StatusBadgeProps> = ({
   const config = statusConfig[status];
   const Icon = CustomIcon || config.icon;
   const shouldPulse = pulse !== undefined ? pulse : config.pulse;
+  const shouldSpin = config.spin || false;
 
   const sizeClasses = {
     sm: 'text-xs px-2 py-0.5 gap-1',
@@ -126,7 +153,7 @@ export const StatusBadge: React.FC<StatusBadgeProps> = ({
         className
       )}
     >
-      <Icon className={iconSizes[size]} />
+      <Icon className={cn(iconSizes[size], shouldSpin && 'animate-spin-slow')} />
       {children || config.label}
     </span>
   );

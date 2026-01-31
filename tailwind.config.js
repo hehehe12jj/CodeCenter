@@ -29,6 +29,7 @@ export default {
           waiting: '#fbbf24',
           completed: '#60a5fa',
           blocked: '#f87171',
+          initializing: '#a78bfa', // 紫色表示初始化中
         },
       },
       backdropBlur: {
@@ -39,6 +40,28 @@ export default {
         'card': '16px',
         'button': '8px',
       },
+      fontFamily: {
+        sans: [
+          'Inter',
+          '-apple-system',
+          'BlinkMacSystemFont',
+          'Segoe UI',
+          'Roboto',
+          'Helvetica Neue',
+          'Arial',
+          'PingFang SC',
+          'Microsoft YaHei',
+          'sans-serif',
+        ],
+        mono: [
+          'JetBrains Mono',
+          'Fira Code',
+          'SF Mono',
+          'Menlo',
+          'Monaco',
+          'monospace',
+        ],
+      },
       animation: {
         'pulse-slow': 'pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite',
         'fade-in': 'fadeIn 300ms ease-out',
@@ -46,6 +69,7 @@ export default {
         'slide-up': 'slideUp 300ms ease-out',
         'scale-in': 'scaleIn 300ms ease-out',
         'message-in': 'messageIn 300ms ease-out',
+        'spin-slow': 'spin 2s linear infinite',
       },
       keyframes: {
         fadeIn: {

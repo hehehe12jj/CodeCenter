@@ -1,6 +1,5 @@
-import React from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { SessionCard } from './SessionCard';
+import { SessionCard } from './components/SessionCard/SessionCard';
 import { useSessionStore } from '@/features/sessions/store/useSessionStore';
 
 // 重新导出自定义 Hook
